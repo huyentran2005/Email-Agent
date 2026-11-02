@@ -99,7 +99,7 @@ class EmailAttachment(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     email_id: Mapped[int] = mapped_column(ForeignKey("emails.id"))
-    provider_attachment_id: Mapped[str] = mapped_column(String(255))
+    provider_attachment_id: Mapped[str] = mapped_column(Text)
     filename: Mapped[str] = mapped_column(Text)
     mime_type: Mapped[str | None] = mapped_column(String(255))
     size: Mapped[int] = mapped_column(BigInteger, default=0)

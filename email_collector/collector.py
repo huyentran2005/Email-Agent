@@ -2,15 +2,15 @@ import base64
 import hashlib
 import logging
 from dataclasses import asdict, dataclass
-from pathlib import PurePosixPath
 from typing import Any
 
 from googleapiclient.errors import HttpError
 
 from .config import Settings
-from .object_storage import AttachmentStorage
+from .object_storage import AttachmentStorage, build_attachment_key
 from .parser import ParsedEmail, parse_gmail_message
 from .repository import EmailRepository
+from .retry import GmailRequestExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,12 @@ class EmailCollector:
         self.settings = settings or Settings()
         self.repository = EmailRepository(self.settings.database_url)
         self.storage = AttachmentStorage(self.settings)
+        self.gmail_requests = GmailRequestExecutor(
+            quota_units_per_minute=self.settings.gmail_quota_units_per_minute,
+            max_attempts=self.settings.gmail_retry_max_attempts,
+            base_delay_seconds=self.settings.gmail_retry_base_delay_seconds,
+            max_delay_seconds=self.settings.gmail_retry_max_delay_seconds,
+        )
 
     def initialize(self) -> None:
         """Chuẩn bị schema PostgreSQL và bucket MinIO trước khi đồng bộ."""
@@ -47,7 +53,11 @@ class EmailCollector:
 
     def sync(self, force_initial: bool = False) -> CollectorResult:
         """Đồng bộ Gmail theo chế độ ban đầu hoặc tăng dần rồi trả về thống kê."""
-        profile = self.gmail.users().getProfile(userId="me").execute()
+        profile = self.gmail_requests.execute(
+            self.gmail.users().getProfile(userId="me"),
+            quota_cost=1,
+            operation="getProfile",
+        )
         email_address = profile["emailAddress"]
         current_history_id = profile["historyId"]
 
@@ -89,8 +99,8 @@ class EmailCollector:
                     else:
                         updated += 1
 
-                # Keep the snapshot taken before collection. Changes that happen
-                # during this run are therefore picked up by the next history sync.
+                # Giữ checkpoint được chụp trước khi bắt đầu thu thập. Các thay đổi
+                # phát sinh trong lần chạy này sẽ được lấy ở lần đồng bộ kế tiếp.
                 next_history_id = current_history_id
                 self.repository.complete_sync(
                     sync_run,
@@ -132,7 +142,7 @@ class EmailCollector:
         message_ids: set[str] = set()
         page_token = None
         while True:
-            response = (
+            request = (
                 self.gmail.users()
                 .messages()
                 .list(
@@ -142,7 +152,9 @@ class EmailCollector:
                     maxResults=self.settings.sync_page_size,
                     pageToken=page_token,
                 )
-                .execute()
+            )
+            response = self.gmail_requests.execute(
+                request, quota_cost=5, operation="messages.list"
             )
             message_ids.update(item["id"] for item in response.get("messages", []))
             page_token = response.get("nextPageToken")
@@ -156,7 +168,7 @@ class EmailCollector:
         page_token = None
         try:
             while True:
-                response = (
+                request = (
                     self.gmail.users()
                     .history()
                     .list(
@@ -166,7 +178,9 @@ class EmailCollector:
                         maxResults=self.settings.sync_page_size,
                         pageToken=page_token,
                     )
-                    .execute()
+                )
+                response = self.gmail_requests.execute(
+                    request, quota_cost=2, operation="history.list"
                 )
                 for history in response.get("history", []):
                     for message in history.get("messages", []):
@@ -184,11 +198,13 @@ class EmailCollector:
     def _get_and_parse(self, message_id: str) -> ParsedEmail | None:
         """Tải một Gmail message và parse; trả về None nếu email đã bị xóa."""
         try:
-            message = (
+            request = (
                 self.gmail.users()
                 .messages()
                 .get(userId="me", id=message_id, format="full")
-                .execute()
+            )
+            message = self.gmail_requests.execute(
+                request, quota_cost=60, operation="messages.get"
             )
         except HttpError as exc:
             if exc.resp.status == 404:
@@ -200,7 +216,7 @@ class EmailCollector:
     def _store_attachments(self, session, email_id: int, parsed: ParsedEmail) -> None:
         """Tải attachment, lưu vào MinIO và ghi metadata vào PostgreSQL."""
         for attachment in parsed.attachments:
-            response = (
+            request = (
                 self.gmail.users()
                 .messages()
                 .attachments()
@@ -209,15 +225,17 @@ class EmailCollector:
                     messageId=parsed.provider_message_id,
                     id=attachment.attachment_id,
                 )
-                .execute()
+            )
+            response = self.gmail_requests.execute(
+                request, quota_cost=20, operation="messages.attachments.get"
             )
             encoded = response.get("data", "")
             data = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
             digest = hashlib.sha256(data).hexdigest()
-            safe_name = PurePosixPath(attachment.filename).name or "attachment"
-            storage_key = (
-                f"gmail/{parsed.provider_message_id}/"
-                f"{attachment.attachment_id}-{safe_name}"
+            storage_key = build_attachment_key(
+                parsed.provider_message_id,
+                attachment.attachment_id,
+                attachment.filename,
             )
             self.storage.put(storage_key, data, attachment.mime_type)
             self.repository.save_attachment(

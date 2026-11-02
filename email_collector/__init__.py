@@ -1,1 +1,1 @@
-"""Gmail collection and persistence package."""
+"""Package thu thập và lưu trữ dữ liệu Gmail."""

@@ -1,6 +1,7 @@
 google-api-python-client>=2.0,<3
 google-auth>=2.0,<3
 google-auth-oauthlib>=1.0,<2
+google-cloud-pubsub>=2.30,<3
 minio>=7.2,<8
 psycopg[binary]>=3.2,<4
 python-dotenv>=1.0,<2

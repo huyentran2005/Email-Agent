@@ -1,9 +1,23 @@
+import hashlib
+import re
 from io import BytesIO
+from pathlib import PurePosixPath
 
 from minio import Minio
 from minio.error import S3Error
 
 from .config import Settings
+
+
+def build_attachment_key(
+    message_id: str, attachment_id: str, filename: str
+) -> str:
+    """Tạo MinIO key ổn định với độ dài thành phần an toàn cho hệ thống file."""
+    attachment_hash = hashlib.sha256(attachment_id.encode("utf-8")).hexdigest()
+    suffix = PurePosixPath(filename.replace("\\", "/")).suffix.lower()
+    if not re.fullmatch(r"\.[a-z0-9]{1,10}", suffix):
+        suffix = ""
+    return f"gmail/{message_id}/{attachment_hash}{suffix}"
 
 
 class AttachmentStorage:
