@@ -108,6 +108,7 @@ def parse_gmail_message(message: dict[str, Any]) -> ParsedEmail:
         headers.setdefault(header["name"].lower(), []).append(header.get("value", ""))
 
     def first_header(name: str) -> str | None:
+        """Lấy giá trị đầu tiên của một header email."""
         values = headers.get(name, [])
         return values[0] if values else None
     text_parts: list[str] = []

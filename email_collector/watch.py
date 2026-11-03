@@ -37,6 +37,7 @@ def resolve_project_id(settings: Settings) -> str:
 
 
 def _request_executor(settings: Settings) -> GmailRequestExecutor:
+    """Tạo bộ thực thi Gmail API có quota và retry."""
     return GmailRequestExecutor(
         quota_units_per_minute=settings.gmail_quota_units_per_minute,
         max_attempts=settings.gmail_retry_max_attempts,

@@ -4,6 +4,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -125,6 +126,111 @@ class EmailSyncRun(Base):
     inserted_count: Mapped[int] = mapped_column(Integer, default=0)
     updated_count: Mapped[int] = mapped_column(Integer, default=0)
     skipped_count: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+class ThreadEventState(Base):
+    __tablename__ = "thread_event_states"
+    __table_args__ = (
+        UniqueConstraint("thread_id", "canonical_key"),
+        Index("ix_thread_event_states_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    thread_id: Mapped[int] = mapped_column(ForeignKey("email_threads.id"))
+    canonical_key: Mapped[str] = mapped_column(String(500))
+    event_type: Mapped[str] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(30), default="open")
+    current_value: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_by_email_id: Mapped[int] = mapped_column(ForeignKey("emails.id"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class EmailEvent(Base):
+    __tablename__ = "email_events"
+    __table_args__ = (
+        UniqueConstraint("source_email_id", "event_index"),
+        Index("ix_email_events_type", "event_type"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    thread_id: Mapped[int] = mapped_column(ForeignKey("email_threads.id"))
+    source_email_id: Mapped[int] = mapped_column(ForeignKey("emails.id"))
+    event_state_id: Mapped[int | None] = mapped_column(ForeignKey("thread_event_states.id"))
+    event_index: Mapped[int] = mapped_column(Integer)
+    event_type: Mapped[str] = mapped_column(String(50))
+    trigger: Mapped[str | None] = mapped_column(Text)
+    arguments: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    extraction_model: Mapped[str] = mapped_column(String(255))
+    extractor_version: Mapped[str] = mapped_column(String(50))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class EventChange(Base):
+    __tablename__ = "event_changes"
+    __table_args__ = (Index("ix_event_changes_source_email", "source_email_id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    event_state_id: Mapped[int] = mapped_column(ForeignKey("thread_event_states.id"))
+    source_email_id: Mapped[int] = mapped_column(ForeignKey("emails.id"))
+    change_type: Mapped[str] = mapped_column(String(30))
+    before_value: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    after_value: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class ThreadSummary(Base):
+    __tablename__ = "thread_summaries"
+    __table_args__ = (
+        UniqueConstraint("thread_id", "summary_type", "version"),
+        Index("ix_thread_summaries_thread_type", "thread_id", "summary_type"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    thread_id: Mapped[int] = mapped_column(ForeignKey("email_threads.id"))
+    summary_type: Mapped[str] = mapped_column(String(20))
+    summary_text: Mapped[str] = mapped_column(Text)
+    based_on_email_id: Mapped[int] = mapped_column(ForeignKey("emails.id"))
+    supporting_email_ids: Mapped[list[int]] = mapped_column(JSONB, default=list)
+    verification: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    model: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class LLMRun(Base):
+    __tablename__ = "llm_runs"
+    __table_args__ = (
+        UniqueConstraint("source_email_id", "task", "prompt_version"),
+        Index("ix_llm_runs_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    thread_id: Mapped[int] = mapped_column(ForeignKey("email_threads.id"))
+    source_email_id: Mapped[int | None] = mapped_column(ForeignKey("emails.id"))
+    task: Mapped[str] = mapped_column(String(40))
+    prompt_version: Mapped[str] = mapped_column(String(50))
+    model: Mapped[str] = mapped_column(String(255))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), default="running")
+    response_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

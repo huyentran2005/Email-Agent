@@ -50,6 +50,7 @@ class GmailRequestExecutor:
         monotonic: Callable[[], float] = time.monotonic,
         jitter: Callable[[float, float], float] = random.uniform,
     ):
+        """Khởi tạo bộ thực thi request với quota và retry."""
         if quota_units_per_minute <= 0:
             raise ValueError("quota_units_per_minute must be positive")
         if max_attempts < 1:
@@ -92,6 +93,7 @@ class GmailRequestExecutor:
         raise RuntimeError("unreachable")
 
     def _throttle(self, quota_cost: int) -> None:
+        """Chờ khi cần để không vượt quá quota request."""
         now = self._monotonic()
         wait_seconds = max(0.0, self._next_request_at - now)
         if wait_seconds:

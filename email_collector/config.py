@@ -28,6 +28,40 @@ class Settings:
     clamav_host: str = os.getenv("CLAMAV_HOST", "localhost")
     clamav_port: int = int(os.getenv("CLAMAV_PORT", "3310"))
     clamav_timeout_seconds: float = float(os.getenv("CLAMAV_TIMEOUT_SECONDS", "30"))
+    llm_proxy_base_url: str = os.getenv("LLM_PROXY_BASE_URL", "")
+    llm_proxy_api_key: str = os.getenv("LLM_PROXY_API_KEY", "")
+    llm_model: str = os.getenv("LLM_MODEL", "")
+    llm_timeout_seconds: float = float(os.getenv("LLM_TIMEOUT_SECONDS", "90"))
+    llm_max_attempts: int = int(os.getenv("LLM_MAX_ATTEMPTS", "3"))
+    llm_json_mode: bool = _as_bool(os.getenv("LLM_JSON_MODE", "true"))
+    llm_allow_suspicious_email: bool = _as_bool(
+        os.getenv("LLM_ALLOW_SUSPICIOUS_EMAIL", "false")
+    )
+    llm_verify_summary: bool = _as_bool(os.getenv("LLM_VERIFY_SUMMARY", "true"))
+    celery_broker_url: str = os.getenv(
+        "CELERY_BROKER_URL", "redis://localhost:6379/0"
+    )
+    celery_result_backend: str = os.getenv(
+        "CELERY_RESULT_BACKEND", "redis://localhost:6379/1"
+    )
+    celery_queue_name: str = os.getenv("CELERY_QUEUE_NAME", "email-llm")
+    celery_key_prefix: str = os.getenv("CELERY_KEY_PREFIX", "email-agent:")
+    celery_visibility_timeout: int = int(
+        os.getenv("CELERY_VISIBILITY_TIMEOUT", "3600")
+    )
+    celery_result_expires: int = int(os.getenv("CELERY_RESULT_EXPIRES", "86400"))
+    celery_task_max_retries: int = int(
+        os.getenv("CELERY_TASK_MAX_RETRIES", "4")
+    )
+    celery_task_retry_backoff: int = int(
+        os.getenv("CELERY_TASK_RETRY_BACKOFF", "30")
+    )
+    celery_worker_concurrency: int = int(
+        os.getenv("CELERY_WORKER_CONCURRENCY", "1")
+    )
+    celery_worker_pool: str = os.getenv(
+        "CELERY_WORKER_POOL", "solo" if os.name == "nt" else "prefork"
+    )
     initial_sync_days: int = int(os.getenv("INITIAL_SYNC_DAYS", "30"))
     sync_page_size: int = int(os.getenv("SYNC_PAGE_SIZE", "100"))
     gmail_quota_units_per_minute: float = float(

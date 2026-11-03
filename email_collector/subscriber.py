@@ -8,6 +8,7 @@ from google.cloud.pubsub_v1.subscriber.scheduler import ThreadScheduler
 
 from .collector import EmailCollector
 from .config import Settings
+from .llm_queue import CeleryJobQueue
 from .watch import resolve_project_id
 
 logger = logging.getLogger(__name__)
@@ -34,11 +35,14 @@ class GmailPullSubscriber:
         collector: EmailCollector,
         settings: Settings,
         expected_email: str,
+        job_queue: CeleryJobQueue,
         subscriber_client=None,
     ):
+        """Khởi tạo subscriber và các phụ thuộc cần thiết."""
         self.collector = collector
         self.settings = settings
         self.expected_email = expected_email.casefold()
+        self.job_queue = job_queue
         self.subscriber = subscriber_client or pubsub_v1.SubscriberClient()
 
     def handle_message(self, message) -> None:
@@ -65,6 +69,8 @@ class GmailPullSubscriber:
                 result.inserted,
                 result.updated,
             )
+            enqueued = self.job_queue.enqueue_email_ids(result.email_ids)
+            logger.info("Enqueued %d LLM thread jobs", enqueued)
             message.ack()
         except Exception:
             logger.exception("Gmail notification processing failed")

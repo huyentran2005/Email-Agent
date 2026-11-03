@@ -17,6 +17,21 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7.4-alpine
+    container_name: email-agent-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --appendfsync everysec
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   minio:
     # Image MinIO chính thức đã bị gỡ khỏi các registry công khai.
     # Image này được build từ mã nguồn của bản phát hành tương ứng.
@@ -56,5 +71,6 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
   minio_data:
   clamav_data:

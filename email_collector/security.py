@@ -47,10 +47,12 @@ _HARMFUL_CONTENT_PATTERNS = {
 
 
 def _header_values(headers: dict[str, list[str]], name: str) -> list[str]:
+    """Lấy các giá trị của một header theo tên."""
     return headers.get(name.lower(), [])
 
 
 def _email_address(value: str | None) -> str | None:
+    """Trích xuất và chuẩn hóa địa chỉ email."""
     if not value:
         return None
     match = re.search(r"[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+", value, re.I)
@@ -58,11 +60,13 @@ def _email_address(value: str | None) -> str | None:
 
 
 def _domain(value: str | None) -> str | None:
+    """Lấy tên miền từ địa chỉ email."""
     address = _email_address(value)
     return address.rsplit("@", 1)[1] if address else None
 
 
 def _ascii_domain(value: str | None) -> str | None:
+    """Chuyển tên miền Unicode sang ASCII IDNA."""
     if not value:
         return None
     try:
@@ -72,17 +76,20 @@ def _ascii_domain(value: str | None) -> str | None:
 
 
 def _organizational_domain(value: str | None) -> str | None:
+    """Xác định tên miền tổ chức theo public suffix."""
     ascii_domain = _ascii_domain(value)
     return get_sld(ascii_domain, strict=False) if ascii_domain else None
 
 
 def _aligned(left: str | None, right: str | None) -> bool | None:
+    """Kiểm tra hai tên miền có cùng miền tổ chức hay không."""
     if not left or not right:
         return None
     return _organizational_domain(left) == _organizational_domain(right)
 
 
 def _auth_status(authentication_results: str, mechanism: str) -> str:
+    """Trích xuất trạng thái của cơ chế xác thực email."""
     match = re.search(rf"\b{mechanism}\s*=\s*([a-z]+)", authentication_results, re.I)
     if not match:
         return "unknown"
@@ -91,6 +98,7 @@ def _auth_status(authentication_results: str, mechanism: str) -> str:
 
 
 def _trusted_authentication_results(headers: dict[str, list[str]]) -> tuple[str, list[str]]:
+    """Chọn kết quả xác thực đáng tin cậy."""
     values = _header_values(headers, "authentication-results")
     if not values:
         return "", []
@@ -109,11 +117,13 @@ def _trusted_authentication_results(headers: dict[str, list[str]]) -> tuple[str,
 
 
 def _auth_property(value: str, property_name: str) -> str | None:
+    """Trích xuất thuộc tính từ kết quả xác thực."""
     match = re.search(rf"\b{re.escape(property_name)}\s*=\s*([^\s;]+)", value, re.I)
     return match.group(1).strip("<>\"'").lower() if match else None
 
 
 def _unicode_scripts(value: str) -> set[str]:
+    """Thu thập các hệ chữ Unicode trong chuỗi."""
     scripts: set[str] = set()
     for char in value:
         if not char.isalpha():
@@ -126,6 +136,7 @@ def _unicode_scripts(value: str) -> set[str]:
 
 
 def _host_reasons(host: str) -> tuple[str | None, list[str]]:
+    """Chuẩn hóa hostname và xác định dấu hiệu rủi ro."""
     try:
         ipaddress.ip_address(host.strip("[]"))
         return host, ["ip_address_host"]
@@ -211,6 +222,10 @@ def analyze_spoofing(
     from_domain = _domain(from_address)
     spf_domain = _auth_property(auth_text, "smtp.mailfrom")
     dkim_domain = _auth_property(auth_text, "header.d")
+    if not dkim_domain:
+        dkim_identity = _auth_property(auth_text, "header.i")
+        if dkim_identity:
+            dkim_domain = dkim_identity.rsplit("@", 1)[-1]
     authenticated_from = _auth_property(auth_text, "header.from")
     alignment = {
         "spf_from": _aligned(from_domain, spf_domain),
@@ -233,12 +248,23 @@ def analyze_spoofing(
         sender_findings.append("untrusted_authentication_results_ignored")
 
     links = analyze_links(body_text, body_html)
-    failed_auth = [name for name, status in auth.items() if status in {"fail", "softfail", "permerror"}]
+    failed_auth: list[str] = []
+    if auth["dmarc"] in {"fail", "permerror"}:
+        failed_auth.append("dmarc")
+    elif auth["dmarc"] != "pass":
+        failed_auth.extend(
+            name
+            for name in ("spf", "dkim")
+            if auth[name] in {"fail", "softfail", "permerror"}
+        )
     strong_sender_findings = [
         item
         for item in sender_findings
-        if item.startswith(("spf_identifier_", "dkim_identifier_"))
-        or (auth["dmarc"] != "pass" and item.endswith("organizational_domain_mismatch"))
+        if auth["dmarc"] != "pass"
+        and (
+            item.startswith(("spf_identifier_", "dkim_identifier_"))
+            or item.endswith("organizational_domain_mismatch")
+        )
     ]
     if failed_auth or strong_sender_findings or links["suspicious_count"]:
         verdict = "suspicious"
@@ -272,6 +298,7 @@ def analyze_spoofing(
 
 
 def _pattern_findings(text: str, patterns: dict[str, str]) -> list[str]:
+    """Tìm các mẫu bảo mật khớp với văn bản."""
     return [name for name, pattern in patterns.items() if re.search(pattern, text, re.I | re.S)]
 
 
@@ -317,6 +344,7 @@ def analyze_content_safety(
 
 
 def _detected_type(data: bytes) -> str:
+    """Nhận diện loại file bằng magic bytes."""
     signatures = (
         (b"MZ", "windows_executable"),
         (b"\x7fELF", "elf_executable"),
@@ -334,6 +362,7 @@ def _detected_type(data: bytes) -> str:
 
 
 def _archive_findings(data: bytes, suffix: str) -> tuple[list[str], str | None]:
+    """Kiểm tra archive và tìm các dấu hiệu rủi ro."""
     findings: list[str] = []
     extracted_text: str | None = None
     if zipfile.is_zipfile(BytesIO(data)):

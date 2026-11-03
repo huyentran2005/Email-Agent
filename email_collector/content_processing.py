@@ -32,6 +32,7 @@ def normalize_plain_text(value: str | None) -> str | None:
 
 
 def _bounded_html(value: str) -> str:
+    """Giới hạn kích thước HTML theo số byte tối đa."""
     encoded = value.encode("utf-8", errors="replace")
     if len(encoded) <= MAX_HTML_BYTES:
         return value
@@ -39,6 +40,7 @@ def _bounded_html(value: str) -> str:
 
 
 def _is_hidden(tag) -> bool:
+    """Kiểm tra một thẻ HTML có bị ẩn hay không."""
     if tag.has_attr("hidden") or str(tag.get("aria-hidden", "")).lower() == "true":
         return True
     return bool(_HIDDEN_STYLE.search(str(tag.get("style", ""))))
