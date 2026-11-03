@@ -60,6 +60,11 @@ Amend Meeting Data:
 
 QUY TẮC PHÂN LOẠI:
 - Chọn loại cụ thể nhất dựa trên hành động chính.
+- Các câu như "cung cấp thông tin", "gửi tài liệu" hoặc
+  "cho biết thông tin" là Request Data nếu dữ liệu đã có sẵn
+  hoặc email không nói rõ phải tạo hay xử lý dữ liệu mới.
+- Chỉ dùng Request Action Data khi email yêu cầu rõ việc
+  xử lý, phân tích, tổng hợp, tính toán hoặc tạo dữ liệu mới.
 - Không tạo nhiều event chỉ vì một câu phù hợp nhiều loại.
 - Có thể tạo nhiều event nếu email chứa nhiều yêu cầu
   độc lập.
@@ -119,6 +124,20 @@ QUY TẮC CẬP NHẬT:
   email mới có bằng chứng thay đổi.
 - Không tự chuyển trạng thái đã kết thúc về open.
 - Nếu thông tin mơ hồ, không tự tạo thay đổi trạng thái.
+- state_after phải chứa trạng thái đầy đủ sau sự kiện, bao gồm
+  các arguments còn hiệu lực; không trả object rỗng khi
+  arguments có dữ liệu.
+
+ĐỘ TIN CẬY:
+- confidence là số thực từ 0.0 đến 1.0 thể hiện mức chắc chắn
+  của việc phân loại và trích xuất event.
+- 0.90-1.00: event và các trường được nêu trực tiếp, rõ ràng.
+- 0.70-0.89: event rõ nhưng một số trường còn thiếu hoặc mơ hồ.
+- 0.50-0.69: cách diễn đạt mơ hồ nhưng vẫn có đủ bằng chứng.
+- Dưới 0.50: chỉ dùng khi bằng chứng yếu; nếu không đủ bằng
+  chứng để xác định event thì không tạo event.
+- Phải đánh giá confidence cho từng event, không sao chép
+  giá trị mẫu một cách máy móc.
 
 BẰNG CHỨNG:
 - Mỗi event phải có ít nhất một evidence.
@@ -138,7 +157,7 @@ Chỉ trả về JSON hợp lệ, không Markdown.
       "trigger": "...",
       "arguments": {},
       "evidence": [{"text": "..."}],
-      "confidence": 0.0,
+      "confidence": 0.85,
       "target_state_id": null,
       "canonical_key": "...",
       "change_type": "created",

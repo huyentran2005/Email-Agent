@@ -193,15 +193,29 @@ class ThreadLLMProcessor:
             change_type = event.get("change_type", "created")
             if status not in EVENT_STATUSES or change_type not in CHANGE_TYPES:
                 raise LLMResponseError(f"Invalid state transition at event {index}")
+            raw_confidence = event.get("confidence")
+            if (
+                isinstance(raw_confidence, bool)
+                or not isinstance(raw_confidence, (int, float))
+                or not 0.0 < float(raw_confidence) <= 1.0
+            ):
+                raise LLMResponseError(
+                    f"Event {index} confidence must be greater than 0.0 and at most 1.0"
+                )
             arguments = event.get("arguments") if isinstance(event.get("arguments"), dict) else {}
-            state_after = event.get("state_after") if isinstance(event.get("state_after"), dict) else arguments
+            raw_state_after = event.get("state_after")
+            state_after = (
+                raw_state_after
+                if isinstance(raw_state_after, dict) and raw_state_after
+                else arguments
+            )
             validated.append(
                 {
                     **event,
                     "arguments": arguments,
                     "state_after": state_after,
                     "evidence": valid_evidence,
-                    "confidence": max(0.0, min(1.0, float(event.get("confidence", 0.0)))),
+                    "confidence": float(raw_confidence),
                     "new_status": status,
                     "change_type": change_type,
                     "canonical_key": _safe_key(str(event.get("canonical_key", "")), event["event_type"], index),
@@ -281,6 +295,10 @@ class ThreadLLMProcessor:
             )
         )
         if previous:
+            email.processing_status = (
+                "processed" if previous.status == "success" else "skipped"
+            )
+            session.commit()
             return 0
         payload = {
             "current_email": {
@@ -302,11 +320,13 @@ class ThreadLLMProcessor:
                 for item in recent_history[-3:]
             ],
         }
+        email.processing_status = "processing"
         run = self._start_run(session, email.thread_id, email.id, "event_extraction", payload)
         if self._is_suspicious(email) and not self.settings.llm_allow_suspicious_email:
             run.status = "skipped"
             run.error = "Email security analysis marked content suspicious"
             run.completed_at = datetime.now(timezone.utc)
+            email.processing_status = "skipped"
             session.commit()
             return 0
         try:
@@ -333,10 +353,13 @@ class ThreadLLMProcessor:
                     )
                 )
             self._finish_run(session, run, response)
+            email.processing_status = "processed"
             session.commit()
             return count
         except Exception as exc:
             self._fail_run(session, run.id, exc)
+            email.processing_status = "failed"
+            session.commit()
             raise
 
     def _summary_payload(self, session, thread: EmailThread, emails: list[Email]) -> dict:
