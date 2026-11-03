@@ -2,7 +2,7 @@
 
 from celery import Celery
 
-from .config import Settings
+from core.config import Settings
 
 
 settings = Settings()
@@ -11,13 +11,13 @@ celery_app = Celery(
     "email_agent",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["email_collector.llm_queue"],
+    include=["workers.llm_queue"],
 )
 
 celery_app.conf.update(
     task_default_queue=settings.celery_queue_name,
     task_routes={
-        "email_collector.process_thread": {"queue": settings.celery_queue_name}
+        "workers.process_thread": {"queue": settings.celery_queue_name}
     },
     task_serializer="json",
     accept_content=["json"],

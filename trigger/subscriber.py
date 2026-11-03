@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from google.cloud import pubsub_v1
 from google.cloud.pubsub_v1.subscriber.scheduler import ThreadScheduler
 
-from .collector import EmailCollector
-from .config import Settings
-from .llm_queue import CeleryJobQueue
+from core.config import Settings
+from email_ingestion.collector import EmailCollector
+from workers.llm_queue import CeleryJobQueue
+
 from .watch import resolve_project_id
 
 logger = logging.getLogger(__name__)

@@ -6,13 +6,14 @@ from typing import Any
 
 from googleapiclient.errors import HttpError
 
-from .config import Settings
+from core.config import Settings
+from email_filtering_understanding.security import attachment_risk
+
 from .malware import ClamAVScanner
 from .object_storage import AttachmentStorage, build_attachment_key
 from .parser import ParsedEmail, parse_gmail_message
 from .repository import EmailRepository
 from .retry import GmailRequestExecutor
-from .security import attachment_risk
 
 logger = logging.getLogger(__name__)
 

@@ -3,8 +3,9 @@ from typing import Any
 
 from gmail_auth import get_gmail_service
 
+from core.config import Settings
+
 from .collector import EmailCollector
-from .config import Settings
 
 
 def build_email_collector_node(

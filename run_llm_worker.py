@@ -1,9 +1,9 @@
 import argparse
 import logging
 
-from email_collector.celery_app import celery_app
-from email_collector.config import Settings
-from email_collector.llm_queue import CeleryJobQueue
+from core.config import Settings
+from workers.celery_app import celery_app
+from workers.llm_queue import CeleryJobQueue
 
 
 def main() -> None:

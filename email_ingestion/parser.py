@@ -6,8 +6,8 @@ from email.header import decode_header, make_header
 from email.utils import getaddresses, parsedate_to_datetime
 from typing import Any
 
-from .content_processing import html_to_text, normalize_plain_text
-from .security import analyze_content_safety, analyze_spoofing
+from email_filtering_understanding.content_processing import html_to_text, normalize_plain_text
+from email_filtering_understanding.security import analyze_content_safety, analyze_spoofing
 
 
 @dataclass

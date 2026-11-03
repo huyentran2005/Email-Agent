@@ -1,7 +1,7 @@
 import argparse
 import json
 
-from email_collector.llm_processing import ThreadLLMProcessor
+from email_filtering_understanding.llm_processing import ThreadLLMProcessor
 
 
 def main() -> None:

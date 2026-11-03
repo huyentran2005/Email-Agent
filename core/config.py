@@ -38,6 +38,24 @@ class Settings:
         os.getenv("LLM_ALLOW_SUSPICIOUS_EMAIL", "false")
     )
     llm_verify_summary: bool = _as_bool(os.getenv("LLM_VERIFY_SUMMARY", "true"))
+    # Semantic search chỉ gửi subject email tới embeddings endpoint.
+    embedding_base_url: str = os.getenv("EMBEDDING_BASE_URL") or os.getenv(
+        "LLM_PROXY_BASE_URL", ""
+    )
+    embedding_api_key: str = os.getenv("EMBEDDING_API_KEY") or os.getenv(
+        "LLM_PROXY_API_KEY", ""
+    )
+    embedding_model: str = os.getenv("EMBEDDING_MODEL", "")
+    embedding_timeout_seconds: float = float(
+        os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60")
+    )
+    embedding_batch_size: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
+    qdrant_url: str = os.getenv("QDRANT_URL", "http://localhost:6333")
+    qdrant_api_key: str = os.getenv("QDRANT_API_KEY", "")
+    qdrant_collection: str = os.getenv("QDRANT_COLLECTION", "email_subjects")
+    qdrant_timeout_seconds: float = float(
+        os.getenv("QDRANT_TIMEOUT_SECONDS", "30")
+    )
     celery_broker_url: str = os.getenv(
         "CELERY_BROKER_URL", "redis://localhost:6379/0"
     )

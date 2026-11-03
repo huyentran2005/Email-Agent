@@ -2,11 +2,11 @@ import json
 import logging
 import threading
 
-from email_collector.collector import EmailCollector
-from email_collector.config import Settings
-from email_collector.llm_queue import CeleryJobQueue
-from email_collector.subscriber import GmailPullSubscriber
-from email_collector.watch import register_gmail_watch, renew_watch_forever
+from core.config import Settings
+from email_ingestion.collector import EmailCollector
+from trigger.subscriber import GmailPullSubscriber
+from trigger.watch import register_gmail_watch, renew_watch_forever
+from workers.llm_queue import CeleryJobQueue
 from gmail_auth import get_gmail_service
 
 

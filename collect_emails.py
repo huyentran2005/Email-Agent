@@ -2,7 +2,7 @@ import argparse
 import json
 import logging
 
-from email_collector.collector import EmailCollector
+from email_ingestion.collector import EmailCollector
 from gmail_auth import get_gmail_service
 
 

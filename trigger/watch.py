@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .config import Settings
-from .retry import GmailRequestExecutor
+from core.config import Settings
+from email_ingestion.retry import GmailRequestExecutor
 
 logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parents[1]

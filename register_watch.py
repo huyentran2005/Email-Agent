@@ -1,8 +1,8 @@
 import json
 import logging
 
-from email_collector.config import Settings
-from email_collector.watch import register_gmail_watch
+from core.config import Settings
+from trigger.watch import register_gmail_watch
 from gmail_auth import get_gmail_service
 
 

@@ -6,7 +6,7 @@ from pathlib import PurePosixPath
 from minio import Minio
 from minio.error import S3Error
 
-from .config import Settings
+from core.config import Settings
 
 
 def build_attachment_key(

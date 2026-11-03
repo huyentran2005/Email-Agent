@@ -8,10 +8,11 @@ from celery import Task
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from core.config import Settings
+from core.models import Email
+from email_filtering_understanding.llm_processing import ThreadLLMProcessor
+
 from .celery_app import celery_app
-from .config import Settings
-from .llm_processing import ThreadLLMProcessor
-from .models import Email
 
 logger = logging.getLogger(__name__)
 settings = Settings()
@@ -27,7 +28,7 @@ def _processor() -> ThreadLLMProcessor:
 
 @celery_app.task(
     bind=True,
-    name="email_collector.process_thread",
+    name="workers.process_thread",
     max_retries=settings.celery_task_max_retries,
     acks_late=True,
     reject_on_worker_lost=True,

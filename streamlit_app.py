@@ -6,8 +6,8 @@ import streamlit as st
 from sqlalchemy.exc import SQLAlchemyError
 from zoneinfo import ZoneInfo
 
-from email_collector.email_assistant import AssistantAnswer, EmailAssistant
-from email_collector.llm_proxy import LLMProxyError
+from llm.email_assistant import AssistantAnswer, EmailAssistant
+from llm.llm_proxy import LLMProxyError
 
 
 SUGGESTIONS = {

@@ -7,9 +7,8 @@ from typing import Any
 
 from sqlalchemy import func, select
 
-from .config import Settings
-from .llm_proxy import LLMProxyClient, LLMProxyConfig, LLMResponseError
-from .models import (
+from core.config import Settings
+from core.models import (
     Email,
     EmailEvent,
     EmailThread,
@@ -18,13 +17,15 @@ from .models import (
     ThreadEventState,
     ThreadSummary,
 )
+from email_ingestion.repository import EmailRepository
+from llm.llm_proxy import LLMProxyClient, LLMProxyConfig, LLMResponseError
+
 from .prompts import (
     EXTRACTION_SYSTEM_PROMPT,
     PROMPT_VERSION,
     SUMMARY_SYSTEM_PROMPT,
     VERIFY_SYSTEM_PROMPT,
 )
-from .repository import EmailRepository
 
 
 EVENT_TYPES = {
