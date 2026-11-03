@@ -24,6 +24,10 @@ class Settings:
     )
     minio_bucket: str = os.getenv("MINIO_BUCKET", "email-attachments")
     minio_secure: bool = _as_bool(os.getenv("MINIO_SECURE", "false"))
+    clamav_enabled: bool = _as_bool(os.getenv("CLAMAV_ENABLED", "true"))
+    clamav_host: str = os.getenv("CLAMAV_HOST", "localhost")
+    clamav_port: int = int(os.getenv("CLAMAV_PORT", "3310"))
+    clamav_timeout_seconds: float = float(os.getenv("CLAMAV_TIMEOUT_SECONDS", "30"))
     initial_sync_days: int = int(os.getenv("INITIAL_SYNC_DAYS", "30"))
     sync_page_size: int = int(os.getenv("SYNC_PAGE_SIZE", "100"))
     gmail_quota_units_per_minute: float = float(

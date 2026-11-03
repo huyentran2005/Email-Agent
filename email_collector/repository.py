@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import (
@@ -28,27 +28,8 @@ class EmailRepository:
         self.session_factory = sessionmaker(self.engine, expire_on_commit=False)
 
     def create_schema(self) -> None:
-        """Tạo các bảng còn thiếu dựa trên SQLAlchemy metadata."""
+        """Tạo schema trực tiếp từ SQLAlchemy models."""
         Base.metadata.create_all(self.engine)
-        self._upgrade_attachment_id_column()
-
-    def _upgrade_attachment_id_column(self) -> None:
-        """Cho phép Gmail attachment ID dài hơn giới hạn VARCHAR(255) cũ."""
-        columns = inspect(self.engine).get_columns("email_attachments")
-        attachment_id_column = next(
-            column
-            for column in columns
-            if column["name"] == "provider_attachment_id"
-        )
-        if getattr(attachment_id_column["type"], "length", None) is None:
-            return
-        with self.engine.begin() as connection:
-            connection.execute(
-                text(
-                    "ALTER TABLE email_attachments "
-                    "ALTER COLUMN provider_attachment_id TYPE TEXT"
-                )
-            )
 
     def get_or_create_account(
         self, session: Session, email_address: str, history_id: str | None = None
@@ -130,7 +111,9 @@ class EmailRepository:
         email.sent_at = parsed.sent_at
         email.received_at = parsed.received_at
         email.raw_payload = parsed.raw_payload
-        email.processing_status = "normalized"
+        email.spoof_analysis = parsed.spoof_analysis
+        email.safety_analysis = parsed.safety_analysis
+        email.processing_status = "security_checked"
         session.flush()
         return SaveResult(email_id=email.id, status=status)
 
@@ -145,6 +128,8 @@ class EmailRepository:
         bucket: str,
         storage_key: str,
         content_hash: str,
+        security_status: str,
+        security_report: dict,
     ) -> None:
         """Upsert metadata attachment và vị trí object tương ứng trong MinIO."""
         attachment = session.scalar(
@@ -165,6 +150,8 @@ class EmailRepository:
         attachment.storage_bucket = bucket
         attachment.storage_key = storage_key
         attachment.content_hash = content_hash
+        attachment.security_status = security_status
+        attachment.security_report = security_report
 
     @staticmethod
     def complete_sync(

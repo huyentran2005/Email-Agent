@@ -49,3 +49,7 @@ class AttachmentStorage:
             length=len(data),
             content_type=content_type or "application/octet-stream",
         )
+
+    def delete(self, key: str) -> None:
+        """Xóa object xác định khi lần quét mới không còn cho phép lưu file."""
+        self.client.remove_object(self.bucket, key)

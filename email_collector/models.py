@@ -76,7 +76,9 @@ class Email(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     raw_payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
-    processing_status: Mapped[str] = mapped_column(String(30), default="normalized")
+    spoof_analysis: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    safety_analysis: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    processing_status: Mapped[str] = mapped_column(String(30), default="security_checked")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -106,6 +108,8 @@ class EmailAttachment(Base):
     storage_bucket: Mapped[str] = mapped_column(String(255))
     storage_key: Mapped[str] = mapped_column(Text)
     content_hash: Mapped[str] = mapped_column(String(64))
+    security_status: Mapped[str] = mapped_column(String(30), default="unscanned")
+    security_report: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
 
     email: Mapped[Email] = relationship(back_populates="attachments")
 

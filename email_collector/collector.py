@@ -7,10 +7,12 @@ from typing import Any
 from googleapiclient.errors import HttpError
 
 from .config import Settings
+from .malware import ClamAVScanner
 from .object_storage import AttachmentStorage, build_attachment_key
 from .parser import ParsedEmail, parse_gmail_message
 from .repository import EmailRepository
 from .retry import GmailRequestExecutor
+from .security import attachment_risk
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,12 @@ class EmailCollector:
         self.settings = settings or Settings()
         self.repository = EmailRepository(self.settings.database_url)
         self.storage = AttachmentStorage(self.settings)
+        self.malware_scanner = ClamAVScanner(
+            enabled=self.settings.clamav_enabled,
+            host=self.settings.clamav_host,
+            port=self.settings.clamav_port,
+            timeout=self.settings.clamav_timeout_seconds,
+        )
         self.gmail_requests = GmailRequestExecutor(
             quota_units_per_minute=self.settings.gmail_quota_units_per_minute,
             max_attempts=self.settings.gmail_retry_max_attempts,
@@ -232,12 +240,32 @@ class EmailCollector:
             encoded = response.get("data", "")
             data = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
             digest = hashlib.sha256(data).hexdigest()
+            security_report = attachment_risk(
+                attachment.filename,
+                attachment.mime_type,
+                self.malware_scanner.scan(data),
+                data,
+            )
             storage_key = build_attachment_key(
                 parsed.provider_message_id,
                 attachment.attachment_id,
                 attachment.filename,
             )
-            self.storage.put(storage_key, data, attachment.mime_type)
+            storage_bucket = self.storage.bucket
+            if not security_report["storage_allowed"]:
+                # Fail closed: chỉ lưu file khi mọi lớp kiểm tra đều không có chỉ báo.
+                self.storage.delete(storage_key)
+                storage_bucket = ""
+                storage_key = ""
+                logger.warning(
+                    "Blocked attachment %s from Gmail message %s: status=%s findings=%s",
+                    attachment.filename,
+                    parsed.provider_message_id,
+                    security_report["status"],
+                    security_report["findings"],
+                )
+            else:
+                self.storage.put(storage_key, data, attachment.mime_type)
             self.repository.save_attachment(
                 session=session,
                 email_id=email_id,
@@ -245,7 +273,9 @@ class EmailCollector:
                 filename=attachment.filename,
                 mime_type=attachment.mime_type,
                 size=len(data),
-                bucket=self.storage.bucket,
+                bucket=storage_bucket,
                 storage_key=storage_key,
                 content_hash=digest,
+                security_status=security_report["status"],
+                security_report=security_report,
             )

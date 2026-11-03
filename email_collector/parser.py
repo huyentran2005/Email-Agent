@@ -6,6 +6,9 @@ from email.header import decode_header, make_header
 from email.utils import getaddresses, parsedate_to_datetime
 from typing import Any
 
+from .content_processing import html_to_text, normalize_plain_text
+from .security import analyze_content_safety, analyze_spoofing
+
 
 @dataclass
 class ParsedAttachment:
@@ -31,6 +34,9 @@ class ParsedEmail:
     sent_at: datetime | None
     received_at: datetime | None
     raw_payload: dict[str, Any]
+    headers: dict[str, list[str]]
+    spoof_analysis: dict[str, Any] = field(default_factory=dict)
+    safety_analysis: dict[str, Any] = field(default_factory=dict)
     attachments: list[ParsedAttachment] = field(default_factory=list)
 
 
@@ -97,10 +103,13 @@ def _strip_body_data(message: dict[str, Any]) -> dict[str, Any]:
 def parse_gmail_message(message: dict[str, Any]) -> ParsedEmail:
     """Parse Gmail message thô thành cấu trúc email đã chuẩn hóa để lưu trữ."""
     payload = message.get("payload", {})
-    headers = {
-        header["name"].lower(): header.get("value", "")
-        for header in payload.get("headers", [])
-    }
+    headers: dict[str, list[str]] = {}
+    for header in payload.get("headers", []):
+        headers.setdefault(header["name"].lower(), []).append(header.get("value", ""))
+
+    def first_header(name: str) -> str | None:
+        values = headers.get(name, [])
+        return values[0] if values else None
     text_parts: list[str] = []
     html_parts: list[str] = []
     attachments: list[ParsedAttachment] = []
@@ -139,20 +148,32 @@ def parse_gmail_message(message: dict[str, Any]) -> ParsedEmail:
         else None
     )
 
-    return ParsedEmail(
+    body_text = normalize_plain_text("\n".join(text_parts))
+    body_html = "\n".join(html_parts).strip() or None
+    if body_text is None:
+        body_text, _ = html_to_text(body_html)
+    parsed = ParsedEmail(
         provider_message_id=message["id"],
         provider_thread_id=message.get("threadId", message["id"]),
-        internet_message_id=headers.get("message-id"),
-        from_address=headers.get("from"),
-        to_addresses=_parse_addresses(headers.get("to")),
-        cc_addresses=_parse_addresses(headers.get("cc")),
-        bcc_addresses=_parse_addresses(headers.get("bcc")),
-        subject=_decode_header(headers.get("subject")),
-        body_text="\n".join(text_parts).strip() or None,
-        body_html="\n".join(html_parts).strip() or None,
+        internet_message_id=first_header("message-id"),
+        from_address=first_header("from"),
+        to_addresses=_parse_addresses(first_header("to")),
+        cc_addresses=_parse_addresses(first_header("cc")),
+        bcc_addresses=_parse_addresses(first_header("bcc")),
+        subject=_decode_header(first_header("subject")),
+        body_text=body_text,
+        body_html=body_html,
         labels=message.get("labelIds", []),
-        sent_at=_parse_date(headers.get("date")),
+        sent_at=_parse_date(first_header("date")),
         received_at=received_at,
         raw_payload=_strip_body_data(message),
+        headers=headers,
         attachments=attachments,
     )
+    parsed.spoof_analysis = analyze_spoofing(
+        parsed.headers, parsed.from_address, parsed.body_text, parsed.body_html
+    )
+    parsed.safety_analysis = analyze_content_safety(
+        parsed.body_text, parsed.attachments, parsed.body_html
+    )
+    return parsed
