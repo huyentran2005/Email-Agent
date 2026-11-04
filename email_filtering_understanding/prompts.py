@@ -72,6 +72,9 @@ QUY TẮC PHÂN LOẠI:
   events = [].
 - Một event có thể cập nhật trạng thái yêu cầu cũ dù
   event_type của email hiện tại khác event_type ban đầu.
+- Các event Deliver Data, Deliver Action Data, Deliver Meeting Data, Amend Data
+  và Amend Meeting Data là thông tin/kết quả đã được cung cấp, không phải một
+  công việc mới đang chờ thực hiện.
 
 TRÍCH XUẤT ARGUMENTS:
 Ưu tiên các trường:
@@ -81,6 +84,10 @@ location, data_type, deliverable.
 
 - Trường không xác định: null.
 - Chỉ trích xuất thông tin có bằng chứng.
+- Chỉ điền assignee khi email giao việc hoặc xác nhận trách nhiệm cho một người
+  cụ thể một cách rõ ràng.
+- Không suy ra assignee từ địa chỉ From, To, CC, chữ ký, người đang trao đổi
+  hoặc người chỉ được nhắc tên. Nếu không có chỉ định rõ ràng, assignee = null.
 - Giữ nguyên thời gian tương đối nếu chưa đủ ngữ cảnh
   để chuẩn hóa thành ngày tuyệt đối.
 - Không tự nâng mức độ ưu tiên.
@@ -113,6 +120,11 @@ fulfilled: đã đáp ứng.
 declined: đã từ chối.
 cancelled: đã hủy.
 superseded: đã bị thay thế.
+
+- Event thuộc nhóm Deliver hoặc Amend đứng độc lập phải có new_status =
+  fulfilled; không để open, tentative hoặc confirmed.
+- Nếu Deliver hoặc Amend liên kết với một yêu cầu cũ, cập nhật yêu cầu đó theo
+  bằng chứng hiện tại thay vì tạo thêm một công việc mở mới.
 
 QUY TẮC CẬP NHẬT:
 - change_type mô tả thay đổi trong email hiện tại.

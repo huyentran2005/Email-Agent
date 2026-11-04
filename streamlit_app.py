@@ -57,7 +57,7 @@ def render_sources(answer: AssistantAnswer) -> None:
                 "%d/%m/%Y %H:%M"
             )
             st.markdown(
-                f"**Email #{source.email_id} · {source.subject}**  \n"
+                f"**{source.subject}**  \n"
                 f"{source.from_address} · {received}"
             )
 
@@ -88,9 +88,12 @@ if not st.session_state["messages"]:
 
 for message in st.session_state["messages"]:
     with st.chat_message(message["role"]):
-        st.markdown(message["content"])
         if message["role"] == "assistant":
-            render_sources(AssistantAnswer.from_message(message))
+            previous_answer = AssistantAnswer.from_message(message)
+            st.markdown(previous_answer.content)
+            render_sources(previous_answer)
+        else:
+            st.markdown(message["content"])
 
 prompt = st.chat_input(
     "Hỏi về email của bạn...",

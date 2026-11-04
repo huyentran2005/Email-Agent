@@ -30,6 +30,13 @@ from . import fallback_planner
 
 LOCAL_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 OPEN_STATUSES = {"open", "tentative", "confirmed"}
+ACTIONABLE_EVENT_TYPES = {
+    "Request Meeting",
+    "Request Data",
+    "Request Action",
+    "Request Action Data",
+    "Request Meeting Data",
+}
 
 
 TOOL_SCHEMAS: tuple[dict[str, Any], ...] = (
@@ -551,7 +558,10 @@ class ReadOnlyEmailTools:
             states = list(
                 session.scalars(
                     select(ThreadEventState)
-                    .where(ThreadEventState.status.in_(sorted(OPEN_STATUSES)))
+                    .where(
+                        ThreadEventState.status.in_(sorted(OPEN_STATUSES)),
+                        ThreadEventState.event_type.in_(sorted(ACTIONABLE_EVENT_TYPES)),
+                    )
                     .order_by(ThreadEventState.updated_at.desc())
                     .limit(max(1, min(int(limit), 100)))
                 )
