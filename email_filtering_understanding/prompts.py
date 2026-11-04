@@ -142,7 +142,7 @@ QUY TẮC CẬP NHẬT:
 BẰNG CHỨNG:
 - Mỗi event phải có ít nhất một evidence.
 - evidence.text phải là chuỗi trích nguyên văn
-  từ body của email hiện tại.
+  từ subject hoặc body của email hiện tại.
 - trigger cũng phải là đoạn trích nguyên văn.
 - Không sử dụng nội dung trích dẫn từ email cũ
   làm bằng chứng cho sự kiện mới.

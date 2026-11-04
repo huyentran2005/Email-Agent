@@ -11,13 +11,16 @@ celery_app = Celery(
     "email_agent",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["workers.llm_queue"],
+    include=["workers.llm_queue", "workers.embedding_queue"],
 )
 
 celery_app.conf.update(
     task_default_queue=settings.celery_queue_name,
     task_routes={
-        "workers.process_thread": {"queue": settings.celery_queue_name}
+        "workers.process_thread": {"queue": settings.celery_queue_name},
+        "workers.index_email_subject": {
+            "queue": settings.celery_embedding_queue_name
+        },
     },
     task_serializer="json",
     accept_content=["json"],

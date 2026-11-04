@@ -38,6 +38,15 @@ class Settings:
         os.getenv("LLM_ALLOW_SUSPICIOUS_EMAIL", "false")
     )
     llm_verify_summary: bool = _as_bool(os.getenv("LLM_VERIFY_SUMMARY", "true"))
+    llm_tool_planner_enabled: bool = _as_bool(
+        os.getenv("LLM_TOOL_PLANNER_ENABLED", "true")
+    )
+    langgraph_enabled: bool = _as_bool(os.getenv("LANGGRAPH_ENABLED", "true"))
+    langgraph_max_replans: int = int(os.getenv("LANGGRAPH_MAX_REPLANS", "1"))
+    langfuse_enabled: bool = _as_bool(os.getenv("LANGFUSE_ENABLED", "false"))
+    langfuse_capture_content: bool = _as_bool(
+        os.getenv("LANGFUSE_CAPTURE_CONTENT", "false")
+    )
     # Semantic search chỉ gửi subject email tới embeddings endpoint.
     embedding_base_url: str = os.getenv("EMBEDDING_BASE_URL") or os.getenv(
         "LLM_PROXY_BASE_URL", ""
@@ -49,7 +58,14 @@ class Settings:
     embedding_timeout_seconds: float = float(
         os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60")
     )
+    embedding_max_attempts: int = int(os.getenv("EMBEDDING_MAX_ATTEMPTS", "5"))
+    embedding_retry_base_seconds: float = float(
+        os.getenv("EMBEDDING_RETRY_BASE_SECONDS", "2")
+    )
     embedding_batch_size: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
+    embedding_jobs_enabled: bool = _as_bool(
+        os.getenv("EMBEDDING_JOBS_ENABLED", "true")
+    )
     qdrant_url: str = os.getenv("QDRANT_URL", "http://localhost:6333")
     qdrant_api_key: str = os.getenv("QDRANT_API_KEY", "")
     qdrant_collection: str = os.getenv("QDRANT_COLLECTION", "email_subjects")
@@ -63,6 +79,9 @@ class Settings:
         "CELERY_RESULT_BACKEND", "redis://localhost:6379/1"
     )
     celery_queue_name: str = os.getenv("CELERY_QUEUE_NAME", "email-llm")
+    celery_embedding_queue_name: str = os.getenv(
+        "CELERY_EMBEDDING_QUEUE_NAME", "email-embedding"
+    )
     celery_key_prefix: str = os.getenv("CELERY_KEY_PREFIX", "email-agent:")
     celery_visibility_timeout: int = int(
         os.getenv("CELERY_VISIBILITY_TIMEOUT", "3600")

@@ -8,6 +8,7 @@ from google.cloud.pubsub_v1.subscriber.scheduler import ThreadScheduler
 
 from core.config import Settings
 from email_ingestion.collector import EmailCollector
+from workers.embedding_queue import EmbeddingJobQueue
 from workers.llm_queue import CeleryJobQueue
 
 from .watch import resolve_project_id
@@ -37,6 +38,7 @@ class GmailPullSubscriber:
         settings: Settings,
         expected_email: str,
         job_queue: CeleryJobQueue,
+        embedding_queue: EmbeddingJobQueue,
         subscriber_client=None,
     ):
         """Khởi tạo subscriber và các phụ thuộc cần thiết."""
@@ -44,6 +46,7 @@ class GmailPullSubscriber:
         self.settings = settings
         self.expected_email = expected_email.casefold()
         self.job_queue = job_queue
+        self.embedding_queue = embedding_queue
         self.subscriber = subscriber_client or pubsub_v1.SubscriberClient()
 
     def handle_message(self, message) -> None:
@@ -71,7 +74,9 @@ class GmailPullSubscriber:
                 result.updated,
             )
             enqueued = self.job_queue.enqueue_email_ids(result.email_ids)
+            embedding_jobs = self.embedding_queue.enqueue_email_ids(result.email_ids)
             logger.info("Enqueued %d LLM thread jobs", enqueued)
+            logger.info("Enqueued %d subject embedding jobs", embedding_jobs)
             message.ack()
         except Exception:
             logger.exception("Gmail notification processing failed")

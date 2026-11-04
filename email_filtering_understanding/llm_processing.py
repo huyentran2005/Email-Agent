@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -43,6 +44,8 @@ EVENT_TYPES = {
 EVENT_STATUSES = {"open", "tentative", "confirmed", "fulfilled", "declined", "cancelled", "superseded"}
 CHANGE_TYPES = {"created", "updated", "confirmed", "fulfilled", "declined", "cancelled", "tentative", "no_change"}
 
+logger = logging.getLogger(__name__)
+
 
 def _request_hash(payload: dict) -> str:
     """Tạo mã băm ổn định cho payload gửi đến LLM."""
@@ -80,6 +83,8 @@ class ThreadLLMProcessor:
                 timeout_seconds=self.settings.llm_timeout_seconds,
                 max_attempts=self.settings.llm_max_attempts,
                 json_mode=self.settings.llm_json_mode,
+                langfuse_enabled=self.settings.langfuse_enabled,
+                langfuse_capture_content=self.settings.langfuse_capture_content,
             )
         )
 
@@ -170,7 +175,7 @@ class ThreadLLMProcessor:
             run.completed_at = datetime.now(timezone.utc)
             session.commit()
 
-    def _validate_extraction(self, response: dict, body_text: str) -> list[dict]:
+    def _validate_extraction(self, response: dict) -> list[dict]:
         """Kiểm tra và chuẩn hóa các sự kiện do LLM trích xuất."""
         events = response.get("events")
         if not isinstance(events, list):
@@ -186,10 +191,10 @@ class ThreadLLMProcessor:
                 item for item in evidence
                 if isinstance(item, dict)
                 and isinstance(item.get("text"), str)
-                and item["text"] in body_text
+                and bool(item["text"].strip())
             ]
             if not valid_evidence:
-                raise LLMResponseError(f"Event {index} has no exact evidence in current email")
+                raise LLMResponseError(f"Event {index} has no usable evidence")
             status = event.get("new_status", "open")
             change_type = event.get("change_type", "created")
             if status not in EVENT_STATUSES or change_type not in CHANGE_TYPES:
@@ -331,8 +336,12 @@ class ThreadLLMProcessor:
             session.commit()
             return 0
         try:
-            response = self.client.chat_json(EXTRACTION_SYSTEM_PROMPT, payload)
-            events = self._validate_extraction(response, email.body_text or "")
+            response = self.client.chat_json(
+                EXTRACTION_SYSTEM_PROMPT,
+                payload,
+                operation_name="email-processing.extract-events",
+            )
+            events = self._validate_extraction(response)
             count = self._apply_events(session, email, events)
             delta = str(response.get("delta_summary") or "").strip()
             if delta:
@@ -426,7 +435,11 @@ class ThreadLLMProcessor:
         run = self._start_run(session, thread.id, last_email.id, "thread_summary", payload)
         verify_run: LLMRun | None = None
         try:
-            response = self.client.chat_json(SUMMARY_SYSTEM_PROMPT, payload)
+            response = self.client.chat_json(
+                SUMMARY_SYSTEM_PROMPT,
+                payload,
+                operation_name="email-processing.summarize-thread",
+            )
             short, long, supporting = self._validate_summary(response, {email.id for email in emails})
             verification: dict[str, Any] = {"supported": None, "skipped": True}
             if self.settings.llm_verify_summary:
@@ -437,7 +450,11 @@ class ThreadLLMProcessor:
                 verify_run = self._start_run(
                     session, thread.id, last_email.id, "summary_verification", verify_payload
                 )
-                verification = self.client.chat_json(VERIFY_SYSTEM_PROMPT, verify_payload)
+                verification = self.client.chat_json(
+                    VERIFY_SYSTEM_PROMPT,
+                    verify_payload,
+                    operation_name="email-processing.verify-summary",
+                )
                 if verification.get("supported") is False:
                     corrected = {
                         "short_summary": verification.get("corrected_short_summary"),
@@ -502,9 +519,23 @@ class ThreadLLMProcessor:
         """Xử lý toàn bộ thread email trong cơ sở dữ liệu."""
         with self.repository.session_factory() as session:
             thread_ids = list(session.scalars(select(EmailThread.id).order_by(EmailThread.id)))
-        totals = {"threads": 0, "emails": 0, "events": 0, "summaries": 0}
+        totals = {
+            "threads": 0,
+            "emails": 0,
+            "events": 0,
+            "summaries": 0,
+            "failed_threads": 0,
+        }
         for thread_id in thread_ids:
-            result = self.process_thread(thread_id)
+            try:
+                result = self.process_thread(thread_id)
+            except Exception:
+                totals["failed_threads"] += 1
+                logger.exception(
+                    "Skipping failed email thread and continuing batch: thread_id=%s",
+                    thread_id,
+                )
+                continue
             totals["threads"] += 1
             for key in ("emails", "events", "summaries"):
                 totals[key] += result[key]

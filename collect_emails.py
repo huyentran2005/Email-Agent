@@ -3,6 +3,7 @@ import json
 import logging
 
 from email_ingestion.collector import EmailCollector
+from workers.embedding_queue import EmbeddingJobQueue
 from gmail_auth import get_gmail_service
 
 
@@ -25,7 +26,11 @@ def main() -> None:
     collector = EmailCollector(get_gmail_service())
     collector.initialize()
     result = collector.sync(force_initial=args.initial)
+    embedding_jobs = EmbeddingJobQueue(collector.settings).enqueue_email_ids(
+        result.email_ids
+    )
     print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+    logging.info("Enqueued %d subject embedding jobs", embedding_jobs)
 
 
 if __name__ == "__main__":

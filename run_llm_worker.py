@@ -3,11 +3,12 @@ import logging
 
 from core.config import Settings
 from workers.celery_app import celery_app
+from workers.embedding_queue import EmbeddingJobQueue
 from workers.llm_queue import CeleryJobQueue
 
 
 def main() -> None:
-    """Tùy chọn backfill rồi khởi động Celery worker xử lý queue LLM."""
+    """Tùy chọn backfill rồi chạy worker xử lý LLM và subject embedding."""
     settings = Settings()
     parser = argparse.ArgumentParser(
         description="Process LLM jobs with a Celery worker backed by Redis."
@@ -42,7 +43,9 @@ def main() -> None:
 
     if args.enqueue_existing:
         enqueued = CeleryJobQueue(settings).enqueue_all_threads()
+        embedding_jobs = EmbeddingJobQueue(settings).enqueue_all_emails()
         logging.info("Enqueued %d existing email threads", enqueued)
+        logging.info("Enqueued %d existing subject embedding jobs", embedding_jobs)
 
     celery_app.worker_main(
         [
@@ -50,7 +53,8 @@ def main() -> None:
             f"--loglevel={args.loglevel}",
             f"--concurrency={args.concurrency}",
             f"--pool={args.pool}",
-            f"--queues={settings.celery_queue_name}",
+            "--queues="
+            f"{settings.celery_queue_name},{settings.celery_embedding_queue_name}",
         ]
     )
 

@@ -36,7 +36,11 @@ class CollectorResult:
 
 
 class EmailCollector:
-    def __init__(self, gmail_service, settings: Settings | None = None):
+    def __init__(
+        self,
+        gmail_service,
+        settings: Settings | None = None,
+    ):
         """Khởi tạo collector cùng Gmail API, repository và MinIO storage."""
         self.gmail = gmail_service
         self.settings = settings or Settings()
