@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -13,10 +13,22 @@ LOCAL_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 _EMAIL_PATTERN = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 _EMAIL_ID_PATTERN = re.compile(r"\bemail\s*#?\s*(\d+)\b", re.IGNORECASE)
 _THREAD_ID_PATTERN = re.compile(r"\bthread\s*#?\s*(\d+)\b", re.IGNORECASE)
+_COMPOUND_SEPARATOR_PATTERN = re.compile(
+    r"\s+(?:và|va|đồng thời|dong thoi|cùng với|cung voi)\s+|[;\n]+",
+    re.IGNORECASE,
+)
 _DATE_RANGE_PATTERN = re.compile(
     r"(?<!\d)(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?"
     r"\s*(?:-|–|—|đến|den|tới|toi|to)\s*"
     r"(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?(?!\d)",
+    re.IGNORECASE,
+)
+_DATE_REFERENCE_PATTERN = re.compile(
+    r"(?<!\d)\d{4}-\d{1,2}-\d{1,2}(?!\d)"
+    r"|(?<!\d)\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?(?!\d)"
+    r"|\b(?:hom nay|hom qua|hom kia|ngay mai)\b"
+    r"|\b(?:tuan|thang|nam)\s+(?:nay|truoc|sau|qua|toi|den|\d{1,4})\b"
+    r"|\b\d+\s*(?:ngay|tuan|thang|nam)\s*(?:qua|gan day|truoc|sau|toi|den)\b",
     re.IGNORECASE,
 )
 _THREAD_DETAIL_MARKERS = (
@@ -50,15 +62,25 @@ _EMAIL_DETAIL_MARKERS = (
 )
 
 
-def infer_detail_scope(query: str) -> str:
-    """Suy ra scope chỉ cho đường fallback khi LLM planner không khả dụng."""
-    normalized = unicodedata.normalize("NFKD", query.casefold()).replace("đ", "d")
+def _normalize_text(value: str) -> str:
+    """Chuẩn hóa tiếng Việt để các rule fallback không phụ thuộc dấu."""
+    normalized = unicodedata.normalize("NFKD", value.casefold()).replace("đ", "d")
     normalized = "".join(
         character
         for character in normalized
         if not unicodedata.combining(character)
     )
-    normalized = " ".join(normalized.split())
+    return " ".join(normalized.split())
+
+
+def has_date_reference(query: str) -> bool:
+    """Chỉ cho phép date filter khi người dùng thực sự nêu mốc thời gian."""
+    return bool(_DATE_REFERENCE_PATTERN.search(_normalize_text(query)))
+
+
+def infer_detail_scope(query: str) -> str:
+    """Suy ra scope chỉ cho đường fallback khi LLM planner không khả dụng."""
+    normalized = _normalize_text(query)
     if any(marker in normalized for marker in _THREAD_DETAIL_MARKERS):
         return "thread"
     if any(marker in normalized for marker in _EMAIL_DETAIL_MARKERS):
@@ -100,6 +122,79 @@ def _search_query_without_dates(query: str) -> str:
         search_query,
         flags=re.IGNORECASE,
     ).strip() or query
+
+
+def is_generic_date_summary(query: str) -> bool:
+    """Nhận diện yêu cầu tổng hợp mọi email trong khoảng ngày, không có chủ đề."""
+    if not has_date_reference(query):
+        return False
+    remainder = _normalize_text(_search_query_without_dates(query))
+    return remainder in {
+        "tong hop",
+        "tong hop thong tin",
+        "tong hop email",
+        "tong hop mail",
+        "tom tat",
+        "tom tat thong tin",
+        "tom tat email",
+        "tom tat mail",
+        "cac email",
+        "cac mail",
+        "email",
+        "mail",
+    }
+
+
+def is_deadline_query(query: str) -> bool:
+    """Nhận diện intent deadline để không bị search email chung làm lệch kết quả."""
+    normalized = _normalize_text(query)
+    return bool(re.search(r"\b(?:deadline|han chot|den han|qua han)\b", normalized))
+
+
+def split_compound_query(query: str) -> tuple[str, ...]:
+    """Tách các vế độc lập khi câu hỏi ghép deadline với một chủ đề khác."""
+    parts = tuple(
+        part.strip(" ,.!?;:")
+        for part in _COMPOUND_SEPARATOR_PATTERN.split(query)
+        if part.strip(" ,.!?;:")
+    )
+    if len(parts) < 2:
+        return (query.strip(),)
+    has_deadline_part = any(is_deadline_query(part) for part in parts)
+    has_other_part = any(not is_deadline_query(part) for part in parts)
+    return parts if has_deadline_part and has_other_part else (query.strip(),)
+
+
+def is_compound_query(query: str) -> bool:
+    """Cho biết câu hỏi có nhiều intent cần trả lời riêng hay không."""
+    return len(split_compound_query(query)) > 1
+
+
+def infer_answer_mode(query: str) -> str:
+    """Tách tổng hợp nội dung email khỏi tổng hợp deadline."""
+    normalized = _normalize_text(query)
+    if is_compound_query(query):
+        return "multi_intent"
+    if is_deadline_query(query):
+        return "deadline_summary"
+    if any(
+        marker in normalized
+        for marker in (
+            "tong hop thong tin",
+            "tong hop email",
+            "tong hop mail",
+            "tom tat thong tin",
+            "tom tat email",
+            "tom tat mail",
+        )
+    ):
+        return "information_summary"
+    return "general"
+
+
+def includes_overdue(query: str) -> bool:
+    """Chỉ gồm deadline quá hạn khi người dùng yêu cầu rõ ràng."""
+    return "qua han" in _normalize_text(query)
 
 
 def plan_read_tools(
@@ -147,9 +242,10 @@ def plan_read_tools(
             {
                 "name": "get_deadlines",
                 "arguments": {
-                    "date_from": today.isoformat(),
-                    "date_to": (today + timedelta(days=7)).isoformat(),
-                    "include_overdue": True,
+                    "include_overdue": any(
+                        marker in normalized for marker in ("quá hạn", "overdue")
+                    ),
+                    **date_arguments,
                 },
             }
         )
@@ -157,15 +253,12 @@ def plan_read_tools(
         calls.append(
             {
                 "name": "get_meetings",
-                "arguments": {
-                    "date_from": today.isoformat(),
-                    "date_to": (today + timedelta(days=30)).isoformat(),
-                },
+                "arguments": dict(date_arguments),
             }
         )
     if any(word in normalized for word in ("việc", "yêu cầu", "đang mở", "chưa làm")):
         calls.append({"name": "get_open_items", "arguments": {"limit": 30}})
-    if any(word in normalized for word in ("hôm nay", "daily brief", "email mới")):
+    if "hôm nay" in normalized:
         calls.append(
             {"name": "get_daily_brief", "arguments": {"day": today.isoformat()}}
         )

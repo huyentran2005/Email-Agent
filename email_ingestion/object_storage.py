@@ -50,6 +50,15 @@ class AttachmentStorage:
             content_type=content_type or "application/octet-stream",
         )
 
+    def get(self, key: str) -> bytes:
+        """Đọc một attachment từ MinIO và luôn giải phóng HTTP connection."""
+        response = self.client.get_object(self.bucket, key)
+        try:
+            return response.read()
+        finally:
+            response.close()
+            response.release_conn()
+
     def delete(self, key: str) -> None:
         """Xóa object xác định khi lần quét mới không còn cho phép lưu file."""
         self.client.remove_object(self.bucket, key)

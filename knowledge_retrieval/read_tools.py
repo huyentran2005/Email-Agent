@@ -42,7 +42,7 @@ ACTIONABLE_EVENT_TYPES = {
 TOOL_SCHEMAS: tuple[dict[str, Any], ...] = (
     {
         "name": "search_emails",
-        "description": "Tìm email theo từ khóa, người gửi và khoảng ngày.",
+        "description": "Tìm email theo từ khóa, người gửi và khoảng ngày tùy chọn.",
         "arguments": [
             "query",
             "search_terms",
@@ -55,7 +55,7 @@ TOOL_SCHEMAS: tuple[dict[str, Any], ...] = (
     },
     {
         "name": "hybrid_search_subjects",
-        "description": "Tìm subject bằng dense semantic + sparse keyword trong khoảng ngày trên Qdrant (RRF).",
+        "description": "Tìm subject bằng dense semantic + sparse keyword trên Qdrant; khoảng ngày là tùy chọn.",
         "arguments": ["query", "date_from", "date_to", "limit"],
         "read_only": True,
     },
@@ -109,6 +109,9 @@ TOOL_SCHEMAS: tuple[dict[str, Any], ...] = (
     },
 )
 
+SEARCH_TOOL_NAMES = frozenset({"search_emails", "hybrid_search_subjects"})
+FUSED_SEARCH_TOOL_NAME = "fused_search_results"
+
 
 def _validated_search_terms(value: Any, fallback_query: str) -> list[str]:
     """Kiểm tra term do LLM sinh; không tự tách từ hoặc áp dụng stop words."""
@@ -124,6 +127,66 @@ def _validated_search_terms(value: Any, fallback_query: str) -> list[str]:
         return terms
     fallback = " ".join(fallback_query.split()).casefold()[:200]
     return [fallback] if fallback else []
+
+
+def _fuse_search_results(
+    tool_results: list[dict[str, Any]],
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Hợp nhất keyword + hybrid theo RRF và loại email trùng."""
+    ranked_results = [
+        item
+        for item in tool_results
+        if item.get("tool") in SEARCH_TOOL_NAMES
+        and isinstance(item.get("result"), list)
+    ]
+    if len(ranked_results) < 2:
+        return tool_results
+
+    scores: dict[int, float] = {}
+    rows: dict[int, dict[str, Any]] = {}
+    methods: dict[int, list[str]] = {}
+    for tool_result in ranked_results:
+        method = str(tool_result["tool"])
+        for rank, raw_row in enumerate(tool_result["result"], start=1):
+            if not isinstance(raw_row, dict):
+                continue
+            try:
+                email_id = int(raw_row["email_id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            scores[email_id] = scores.get(email_id, 0.0) + 1.0 / (60 + rank)
+            methods.setdefault(email_id, []).append(method)
+            if email_id not in rows or method == "search_emails":
+                rows[email_id] = dict(raw_row)
+
+    fused_rows: list[dict[str, Any]] = []
+    for email_id in sorted(scores, key=lambda item: (-scores[item], item))[
+        : max(1, min(int(limit), 50))
+    ]:
+        row = dict(rows[email_id])
+        row["fusion_score"] = round(scores[email_id], 8)
+        row["retrieval_methods"] = list(dict.fromkeys(methods[email_id]))
+        fused_rows.append(row)
+
+    fused_item = {
+        "tool": FUSED_SEARCH_TOOL_NAME,
+        "arguments": {
+            "methods": [item["tool"] for item in ranked_results],
+            "limit": limit,
+        },
+        "result": fused_rows,
+    }
+    first_search_index = next(
+        index
+        for index, item in enumerate(tool_results)
+        if item.get("tool") in SEARCH_TOOL_NAMES
+    )
+    preserved = [
+        item for item in tool_results if item.get("tool") not in SEARCH_TOOL_NAMES
+    ]
+    preserved.insert(min(first_search_index, len(preserved)), fused_item)
+    return preserved
 
 
 def _is_suspicious(email: Email) -> bool:
@@ -317,9 +380,102 @@ class ReadOnlyEmailTools:
             seen.add(name)
             if len(calls) >= max(1, min(int(max_calls), 5)):
                 break
+
         extracted_range = fallback_planner.extract_date_range(
             query, datetime.now(LOCAL_TIMEZONE).date()
         )
+        if (
+            fallback_planner.is_deadline_query(query)
+            and not fallback_planner.is_compound_query(query)
+        ):
+            deadline_arguments: dict[str, Any] = {
+                "include_overdue": fallback_planner.includes_overdue(query),
+                "limit": 100,
+            }
+            if extracted_range:
+                deadline_arguments.update(
+                    {
+                        "date_from": extracted_range[0].isoformat(),
+                        "date_to": extracted_range[1].isoformat(),
+                    }
+                )
+            return [{"name": "get_deadlines", "arguments": deadline_arguments}]
+        if fallback_planner.is_generic_date_summary(query) and extracted_range:
+            return [
+                {
+                    "name": "search_emails",
+                    "arguments": {
+                        "query": "",
+                        "search_terms": [],
+                        "date_from": extracted_range[0].isoformat(),
+                        "date_to": extracted_range[1].isoformat(),
+                        "limit": 50,
+                    },
+                }
+            ]
+
+        direct_lookup = any(
+            call["name"] in {"get_email", "get_thread", "get_sender_history"}
+            for call in calls
+        )
+        if calls and self.settings.embedding_model and not direct_lookup:
+            present = {call["name"] for call in calls}
+            shared_arguments: dict[str, Any] = {}
+            for call in calls:
+                for key in ("date_from", "date_to"):
+                    if call["arguments"].get(key):
+                        shared_arguments[key] = call["arguments"][key]
+            existing_search = next(
+                (call for call in calls if call["name"] in SEARCH_TOOL_NAMES),
+                None,
+            )
+            search_query = " ".join(
+                str(
+                    (existing_search or {}).get("arguments", {}).get("query")
+                    or query
+                ).split()
+            )
+            if "search_emails" not in present:
+                calls.append(
+                    {
+                        "name": "search_emails",
+                        "arguments": {
+                            "query": search_query,
+                            "search_terms": _validated_search_terms(None, search_query),
+                            "limit": 12,
+                            **shared_arguments,
+                        },
+                    }
+                )
+            if "hybrid_search_subjects" not in present:
+                calls.append(
+                    {
+                        "name": "hybrid_search_subjects",
+                        "arguments": {
+                            "query": search_query,
+                            "limit": 12,
+                            **shared_arguments,
+                        },
+                    }
+                )
+            max_normalized_calls = max(2, min(int(max_calls), 5))
+            if len(calls) > max_normalized_calls:
+                search_pair = [
+                    call for call in calls if call["name"] in SEARCH_TOOL_NAMES
+                ]
+                specialist_calls = [
+                    call for call in calls if call["name"] not in SEARCH_TOOL_NAMES
+                ]
+                calls = (
+                    specialist_calls[: max_normalized_calls - 2] + search_pair[:2]
+                )
+
+        if not fallback_planner.has_date_reference(query):
+            calls = [call for call in calls if call["name"] != "get_daily_brief"]
+            for call in calls:
+                for key in ("date_from", "date_to", "day"):
+                    call["arguments"].pop(key, None)
+            return calls
         shared_dates: dict[str, str] = {}
         if extracted_range:
             shared_dates = {
@@ -327,7 +483,7 @@ class ReadOnlyEmailTools:
                 "date_to": extracted_range[1].isoformat(),
             }
         for call in calls:
-            if call["name"] not in {"search_emails", "hybrid_search_subjects"}:
+            if call["name"] not in SEARCH_TOOL_NAMES:
                 continue
             for key in ("date_from", "date_to"):
                 value = call["arguments"].get(key)
@@ -335,7 +491,7 @@ class ReadOnlyEmailTools:
                     shared_dates[key] = value
         if shared_dates:
             for call in calls:
-                if call["name"] in {"search_emails", "hybrid_search_subjects"}:
+                if call["name"] in SEARCH_TOOL_NAMES:
                     call["arguments"].update(shared_dates)
         return calls
 
@@ -379,14 +535,18 @@ class ReadOnlyEmailTools:
                     "result": result,
                 }
             )
-        return results
+        return _fuse_search_results(results)
 
     def run_for_query(self, query: str, max_calls: int = 3) -> list[dict[str, Any]]:
         """Dùng router quy tắc làm fallback rồi thực thi các read tool."""
-        calls = fallback_planner.plan_read_tools(
+        calls = self.normalize_calls(
+            fallback_planner.plan_read_tools(
+                query,
+                max_calls=max_calls,
+                semantic_enabled=bool(self.settings.embedding_model),
+            ),
             query,
             max_calls=max_calls,
-            semantic_enabled=bool(self.settings.embedding_model),
         )
         return self.run_calls(calls)
 
@@ -572,12 +732,13 @@ class ReadOnlyEmailTools:
         self,
         date_from: str | date | None = None,
         date_to: str | date | None = None,
-        include_overdue: bool = True,
+        include_overdue: bool = False,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        """Lấy deadline trong khoảng ngày và tùy chọn gồm việc quá hạn."""
-        start = _parse_date(date_from) or datetime.now(LOCAL_TIMEZONE).date()
-        end = _parse_date(date_to) or start + timedelta(days=7)
+        """Lấy deadline, chỉ giới hạn ngày khi caller truyền mốc thời gian."""
+        start = _parse_date(date_from)
+        end = _parse_date(date_to)
+        today = datetime.now(LOCAL_TIMEZONE).date()
         items = self.get_open_items(limit=limit)
         results = []
         for item in items:
@@ -586,15 +747,15 @@ class ReadOnlyEmailTools:
             parsed = _parse_date(raw_deadline)
             if parsed is None:
                 continue
-            if parsed < start and not include_overdue:
+            if start is not None and parsed < start and not include_overdue:
                 continue
-            if parsed > end:
+            if end is not None and parsed > end:
                 continue
             item = dict(item)
             item["deadline"] = str(raw_deadline)
             item["deadline_date"] = parsed.isoformat()
             item["deadline_status"] = (
-                "overdue" if parsed < start else "due_today" if parsed == start else "upcoming"
+                "overdue" if parsed < today else "due_today" if parsed == today else "upcoming"
             )
             results.append(item)
         results.sort(key=lambda item: (item["deadline_date"], item["state_id"]))
@@ -606,12 +767,12 @@ class ReadOnlyEmailTools:
         date_to: str | date | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        """Lấy các event họp trong khoảng ngày được yêu cầu."""
-        start = _parse_date(date_from) or datetime.now(LOCAL_TIMEZONE).date()
-        end = _parse_date(date_to) or start + timedelta(days=30)
+        """Lấy event họp, chỉ giới hạn ngày khi caller truyền mốc thời gian."""
         return [
             item
-            for item in self.get_deadlines(start, end, include_overdue=False, limit=limit)
+            for item in self.get_deadlines(
+                date_from, date_to, include_overdue=False, limit=limit
+            )
             if "Meeting" in item["event_type"]
             or item["current_value"].get("meeting_time")
         ]

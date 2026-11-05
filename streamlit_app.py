@@ -62,6 +62,29 @@ def render_sources(answer: AssistantAnswer) -> None:
             )
 
 
+def render_attachments(answer: AssistantAnswer, message_key: str) -> None:
+    """Hiển thị nút tải lazy cho các attachment đã vượt qua security policy."""
+    if not answer.attachments:
+        return
+    assistant = get_assistant()
+    st.caption("Tệp đính kèm an toàn")
+    for attachment in answer.attachments:
+        size_kb = max(1, round(attachment.size / 1024))
+        st.download_button(
+            label=attachment.filename,
+            data=lambda item=attachment, service=assistant: service.download_attachment(
+                item
+            ),
+            file_name=attachment.filename,
+            mime=attachment.mime_type,
+            key=f"attachment-{message_key}-{attachment.attachment_id}",
+            help=f"{size_kb:,} KB",
+            on_click="ignore",
+            icon=":material/download:",
+            width="content",
+        )
+
+
 st.session_state.setdefault("messages", [])
 
 with st.sidebar:
@@ -86,11 +109,12 @@ if not st.session_state["messages"]:
             "deadline hoặc tra cứu thông tin."
         )
 
-for message in st.session_state["messages"]:
+for message_index, message in enumerate(st.session_state["messages"]):
     with st.chat_message(message["role"]):
         if message["role"] == "assistant":
             previous_answer = AssistantAnswer.from_message(message)
             st.markdown(previous_answer.content)
+            render_attachments(previous_answer, f"history-{message_index}")
             render_sources(previous_answer)
         else:
             st.markdown(message["content"])
@@ -132,6 +156,7 @@ if prompt:
                     state="complete",
                 )
             st.markdown(answer.content)
+            render_attachments(answer, f"current-{len(st.session_state['messages'])}")
             render_sources(answer)
         except (SQLAlchemyError, LLMProxyError, ValueError) as exc:
             answer = AssistantAnswer.error(
