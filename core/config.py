@@ -38,6 +38,8 @@ class Settings:
         os.getenv("LLM_ALLOW_SUSPICIOUS_EMAIL", "false")
     )
     llm_verify_summary: bool = _as_bool(os.getenv("LLM_VERIFY_SUMMARY", "true"))
+    memory_enabled: bool = _as_bool(os.getenv("MEMORY_ENABLED", "true"))
+    memory_namespace: str = os.getenv("MEMORY_NAMESPACE", "default")
     llm_tool_planner_enabled: bool = _as_bool(
         os.getenv("LLM_TOOL_PLANNER_ENABLED", "true")
     )

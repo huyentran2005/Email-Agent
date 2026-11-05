@@ -236,3 +236,30 @@ class LLMRun(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ConversationMemory(Base):
+    """Một lượt hội thoại đã hoàn tất để trợ lý có thể nhớ qua các phiên."""
+
+    __tablename__ = "conversation_memories"
+    __table_args__ = (
+        UniqueConstraint("namespace", "memory_hash"),
+        Index(
+            "ix_conversation_memories_namespace_created",
+            "namespace",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    namespace: Mapped[str] = mapped_column(String(100), default="default")
+    memory_hash: Mapped[str] = mapped_column(String(64))
+    user_message: Mapped[str] = mapped_column(Text)
+    assistant_message: Mapped[str] = mapped_column(Text)
+    source_email_ids: Mapped[list[int]] = mapped_column(JSONB, default=list)
+    memory_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, default=dict
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

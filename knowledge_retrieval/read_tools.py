@@ -26,6 +26,7 @@ from .subject_embeddings import (
     QdrantError,
     SubjectHybridSearch,
 )
+from .memory_store import ConversationMemoryStore
 from . import fallback_planner
 
 
@@ -100,6 +101,12 @@ TOOL_SCHEMAS: tuple[dict[str, Any], ...] = (
         "name": "get_sender_history",
         "description": "Lấy lịch sử trao đổi với một địa chỉ email.",
         "arguments": ["email_address", "limit"],
+        "read_only": True,
+    },
+    {
+        "name": "search_memory",
+        "description": "Tìm lại thông tin từ các lượt hội thoại trước của người dùng.",
+        "arguments": ["query", "limit"],
         "read_only": True,
     },
     {
@@ -300,6 +307,11 @@ class ReadOnlyEmailTools:
         self.tracer = LangfuseTracer(self.settings.langfuse_enabled)
         self.engine = create_engine(self.settings.database_url, pool_pre_ping=True)
         self.session_factory = sessionmaker(self.engine, expire_on_commit=False)
+        self.memory_store = ConversationMemoryStore(
+            self.engine,
+            self.session_factory,
+            self.settings.memory_namespace,
+        )
         self._hybrid_search: SubjectHybridSearch | None = None
         self._registry = {
             "search_emails": self.search_emails,
@@ -311,6 +323,7 @@ class ReadOnlyEmailTools:
             "get_meetings": self.get_meetings,
             "get_daily_brief": self.get_daily_brief,
             "get_sender_history": self.get_sender_history,
+            "search_memory": self.search_memory,
             "get_email_sources": self.get_email_sources,
         }
 
@@ -327,6 +340,7 @@ class ReadOnlyEmailTools:
             dict(schema)
             for schema in TOOL_SCHEMAS
             if schema["name"] != "get_email_sources"
+            and (schema["name"] != "search_memory" or self.settings.memory_enabled)
             and (
                 schema["name"] != "hybrid_search_subjects"
                 or bool(self.settings.embedding_model)
@@ -347,6 +361,7 @@ class ReadOnlyEmailTools:
             "get_email": {"email_id"},
             "get_thread": {"thread_id"},
             "get_sender_history": {"email_address"},
+            "search_memory": {"query"},
         }
         if not isinstance(raw_calls, list):
             return []
@@ -367,7 +382,11 @@ class ReadOnlyEmailTools:
                 for key, value in raw_arguments.items()
                 if key in allowed and value is not None
             }
-            if name in {"search_emails", "hybrid_search_subjects"}:
+            if name in {
+                "search_emails",
+                "hybrid_search_subjects",
+                "search_memory",
+            }:
                 arguments["query"] = str(arguments.get("query") or query).strip()
             if name == "search_emails":
                 arguments["search_terms"] = _validated_search_terms(
@@ -445,7 +464,8 @@ class ReadOnlyEmailTools:
             ]
 
         direct_lookup = any(
-            call["name"] in {"get_email", "get_thread", "get_sender_history"}
+            call["name"]
+            in {"get_email", "get_thread", "get_sender_history", "search_memory"}
             for call in calls
         )
         if calls and self.settings.embedding_model and not direct_lookup:
@@ -847,6 +867,12 @@ class ReadOnlyEmailTools:
             limit=limit,
         )
 
+    def search_memory(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
+        """Tìm các lượt hội thoại trước liên quan đến câu hỏi hiện tại."""
+        if not self.settings.memory_enabled:
+            return []
+        return self.memory_store.search(query=query, limit=limit)
+
     def get_email_sources(self, email_ids: list[int]) -> list[dict[str, Any]]:
         """Lấy metadata nguồn cho các email ID đã được agent sử dụng."""
         unique_ids = list(dict.fromkeys(int(item) for item in email_ids))[:100]
@@ -883,7 +909,9 @@ class ReadOnlyEmailTools:
                 for key, item in value.items():
                     if key in {"email_id", "source_email_id", "updated_by_email_id"} and isinstance(item, int):
                         ids.append(item)
-                    elif key == "supporting_email_ids" and isinstance(item, list):
+                    elif key in {"supporting_email_ids", "source_email_ids"} and isinstance(
+                        item, list
+                    ):
                         ids.extend(number for number in item if isinstance(number, int))
                     else:
                         visit(item)

@@ -228,6 +228,24 @@ def includes_overdue(query: str) -> bool:
     return "qua han" in _normalize_text(query)
 
 
+def is_memory_query(query: str) -> bool:
+    """Nhận diện câu hỏi tham chiếu rõ ràng tới hội thoại trước."""
+    normalized = _normalize_text(query)
+    return any(
+        marker in normalized
+        for marker in (
+            "ban con nho",
+            "da trao doi",
+            "da noi",
+            "ghi nho",
+            "hoi truoc",
+            "lan truoc",
+            "toi tung noi",
+            "truoc day",
+        )
+    )
+
+
 def plan_read_tools(
     query: str, max_calls: int = 3, semantic_enabled: bool = False
 ) -> list[dict[str, Any]]:
@@ -246,6 +264,14 @@ def plan_read_tools(
         else {}
     )
     calls: list[dict[str, Any]] = []
+
+    if is_memory_query(query):
+        return [
+            {
+                "name": "search_memory",
+                "arguments": {"query": query, "limit": 5},
+            }
+        ]
 
     email_id = _EMAIL_ID_PATTERN.search(query)
     thread_id = _THREAD_ID_PATTERN.search(query)

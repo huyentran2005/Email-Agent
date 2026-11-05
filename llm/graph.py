@@ -194,6 +194,7 @@ class EmailAgentGraph:
             last_results,
             previous_calls=state.get("previous_calls", []),
             query=state.get("question", ""),
+            history=state.get("history"),
         )
         if expansion_calls:
             return {

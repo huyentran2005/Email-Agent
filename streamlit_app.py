@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import streamlit as st
 from sqlalchemy.exc import SQLAlchemyError
 from zoneinfo import ZoneInfo
@@ -22,6 +24,7 @@ SUGGESTIONS = {
     ),
 }
 LOCAL_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
+PIPELINE_IMAGE = Path(__file__).resolve().parent / "assets" / "email_agent_pipeline.svg"
 
 
 st.set_page_config(
@@ -101,6 +104,24 @@ with st.sidebar:
 
 st.title("Trợ lý email")
 st.caption("Đọc, lọc và tổng hợp thông tin từ email bằng hội thoại tự nhiên.")
+
+with st.expander(
+    "Pipeline xử lý",
+    icon=":material/account_tree:",
+    type="compact",
+):
+    st.image(
+        PIPELINE_IMAGE,
+        width="stretch",
+        alt=(
+            "Pipeline Analyze, Policy, Tools, Observe, Answer và Audit; "
+            "Observe có thể quay lại Policy để mở rộng hoặc lập kế hoạch lại."
+        ),
+    )
+    st.caption(
+        "Nhánh lặp chỉ chạy khi cần mở rộng dữ liệu hoặc lập kế hoạch lại; "
+        "mọi tool đều đi qua Policy trước khi thực thi."
+    )
 
 if not st.session_state["messages"]:
     with st.chat_message("assistant", avatar=":material/robot_2:"):
