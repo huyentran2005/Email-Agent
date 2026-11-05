@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -114,7 +115,7 @@ FUSED_SEARCH_TOOL_NAME = "fused_search_results"
 
 
 def _validated_search_terms(value: Any, fallback_query: str) -> list[str]:
-    """Kiểm tra term do LLM sinh; không tự tách từ hoặc áp dụng stop words."""
+    """Kiểm tra term của planner và bổ sung alias nghiệp vụ cần thiết."""
     raw_terms = value if isinstance(value, list) else []
     terms: list[str] = []
     for item in raw_terms[:8]:
@@ -123,15 +124,32 @@ def _validated_search_terms(value: Any, fallback_query: str) -> list[str]:
         term = " ".join(item.split()).casefold()
         if 2 <= len(term) <= 100 and term not in terms:
             terms.append(term)
-    if terms:
-        return terms
     fallback = " ".join(fallback_query.split()).casefold()[:200]
-    return [fallback] if fallback else []
+    if not terms and fallback:
+        terms.append(fallback)
+
+    normalized = unicodedata.normalize(
+        "NFKD", " ".join([fallback, *terms])
+    ).replace("đ", "d")
+    normalized = "".join(
+        character
+        for character in normalized
+        if not unicodedata.combining(character)
+    )
+    if "cap quyen" in normalized and (
+        "du an" in normalized or "project" in normalized
+    ):
+        # Email GitLab dùng subject tiếng Anh dạng
+        # "Access to ... project was granted", trong khi user thường hỏi tiếng Việt.
+        for synonym in ("access to the", "was granted", "project"):
+            if synonym not in terms and len(terms) < 8:
+                terms.append(synonym)
+    return terms
 
 
 def _fuse_search_results(
     tool_results: list[dict[str, Any]],
-    limit: int = 20,
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """Hợp nhất keyword + hybrid theo RRF và loại email trùng."""
     ranked_results = [
@@ -142,6 +160,16 @@ def _fuse_search_results(
     ]
     if len(ranked_results) < 2:
         return tool_results
+    if limit is None:
+        requested_limits = [
+            item.get("arguments", {}).get("limit")
+            for item in ranked_results
+            if isinstance(item.get("arguments"), dict)
+        ]
+        numeric_limits = [
+            int(value) for value in requested_limits if str(value).isdigit()
+        ]
+        limit = max(numeric_limits, default=20)
 
     scores: dict[int, float] = {}
     rows: dict[int, dict[str, Any]] = {}
@@ -384,6 +412,8 @@ class ReadOnlyEmailTools:
         extracted_range = fallback_planner.extract_date_range(
             query, datetime.now(LOCAL_TIMEZONE).date()
         )
+        exhaustive_listing = fallback_planner.requests_exhaustive_listing(query)
+        search_limit = 50 if exhaustive_listing else 12
         if (
             fallback_planner.is_deadline_query(query)
             and not fallback_planner.is_compound_query(query)
@@ -442,7 +472,7 @@ class ReadOnlyEmailTools:
                         "arguments": {
                             "query": search_query,
                             "search_terms": _validated_search_terms(None, search_query),
-                            "limit": 12,
+                            "limit": search_limit,
                             **shared_arguments,
                         },
                     }
@@ -453,7 +483,7 @@ class ReadOnlyEmailTools:
                         "name": "hybrid_search_subjects",
                         "arguments": {
                             "query": search_query,
-                            "limit": 12,
+                            "limit": search_limit,
                             **shared_arguments,
                         },
                     }
@@ -470,6 +500,10 @@ class ReadOnlyEmailTools:
                     specialist_calls[: max_normalized_calls - 2] + search_pair[:2]
                 )
 
+        if exhaustive_listing:
+            for call in calls:
+                if call["name"] in SEARCH_TOOL_NAMES:
+                    call["arguments"]["limit"] = 50
         if not fallback_planner.has_date_reference(query):
             calls = [call for call in calls if call["name"] != "get_daily_brief"]
             for call in calls:

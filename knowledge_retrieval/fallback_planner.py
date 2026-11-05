@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from calendar import monthrange
 from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -21,6 +22,11 @@ _DATE_RANGE_PATTERN = re.compile(
     r"(?<!\d)(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?"
     r"\s*(?:-|–|—|đến|den|tới|toi|to)\s*"
     r"(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?(?!\d)",
+    re.IGNORECASE,
+)
+_MONTH_REFERENCE_PATTERN = re.compile(
+    r"\b(?:tháng|thang)\s+(\d{1,2})"
+    r"(?:\s*(?:/|-|năm|nam)\s*(\d{2,4}))?\b",
     re.IGNORECASE,
 )
 _DATE_REFERENCE_PATTERN = re.compile(
@@ -89,10 +95,23 @@ def infer_detail_scope(query: str) -> str:
 
 
 def extract_date_range(query: str, today: date) -> tuple[date, date] | None:
-    """Rút khoảng dd/mm[-yyyy] để fallback vẫn lọc đúng khi LLM lỗi."""
+    """Rút khoảng ngày hoặc tháng để fallback vẫn lọc đúng khi LLM lỗi."""
     match = _DATE_RANGE_PATTERN.search(query)
     if not match:
-        return None
+        month_match = _MONTH_REFERENCE_PATTERN.search(query)
+        if not month_match:
+            return None
+        month_raw, year_raw = month_match.groups()
+        try:
+            month = int(month_raw)
+            year = int(year_raw) if year_raw else today.year
+            if year < 100:
+                year += 2000
+            return date(year, month, 1), date(
+                year, month, monthrange(year, month)[1]
+            )
+        except ValueError:
+            return None
     start_day, start_month, start_year, end_day, end_month, end_year = match.groups()
 
     def full_year(raw: str | None, fallback: int) -> int:
@@ -116,6 +135,7 @@ def extract_date_range(query: str, today: date) -> tuple[date, date] | None:
 def _search_query_without_dates(query: str) -> str:
     """Bỏ khoảng ngày khỏi semantic query vì ngày được truyền bằng filter riêng."""
     search_query = _DATE_RANGE_PATTERN.sub(" ", query)
+    search_query = _MONTH_REFERENCE_PATTERN.sub(" ", search_query)
     return re.sub(
         r"\b(?:từ|tu)(?:\s+(?:ngày|ngay))?\s*$",
         "",
@@ -170,6 +190,17 @@ def is_compound_query(query: str) -> bool:
     return len(split_compound_query(query)) > 1
 
 
+def requests_exhaustive_listing(query: str) -> bool:
+    """Nhận diện yêu cầu cần liệt kê đủ, không chỉ chọn vài ví dụ tiêu biểu."""
+    normalized = _normalize_text(query)
+    return bool(
+        re.search(
+            r"\b(?:liet ke|tat ca|day du|toan bo|danh sach|cac|nhung|bao nhieu)\b",
+            normalized,
+        )
+    )
+
+
 def infer_answer_mode(query: str) -> str:
     """Tách tổng hợp nội dung email khỏi tổng hợp deadline."""
     normalized = _normalize_text(query)
@@ -205,6 +236,7 @@ def plan_read_tools(
     today = datetime.now(LOCAL_TIMEZONE).date()
     extracted_range = extract_date_range(query, today)
     search_query = _search_query_without_dates(query)
+    search_limit = 50 if requests_exhaustive_listing(query) else 12
     date_arguments = (
         {
             "date_from": extracted_range[0].isoformat(),
@@ -268,7 +300,11 @@ def plan_read_tools(
         calls.append(
             {
                 "name": "hybrid_search_subjects",
-                "arguments": {"query": search_query, "limit": 12, **date_arguments},
+                "arguments": {
+                    "query": search_query,
+                    "limit": search_limit,
+                    **date_arguments,
+                },
             }
         )
     calls.append(
@@ -277,7 +313,7 @@ def plan_read_tools(
             "arguments": {
                 "query": search_query,
                 "search_terms": [search_query],
-                "limit": 12,
+                "limit": search_limit,
                 **date_arguments,
             },
         }

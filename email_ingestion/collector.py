@@ -146,8 +146,11 @@ class EmailCollector:
         )
 
     def _list_initial_message_ids(self) -> list[str]:
-        """Lấy ID email Inbox trong số ngày cấu hình cho lần đồng bộ ban đầu."""
-        query = f"newer_than:{self.settings.initial_sync_days}d"
+        """Lấy ID email toàn hộp thư trong số ngày cấu hình ban đầu."""
+        query = (
+            f"newer_than:{self.settings.initial_sync_days}d "
+            "-in:spam -in:trash"
+        )
         return self._paginate_messages(query=query)
 
     def _paginate_messages(self, query: str) -> list[str]:
@@ -161,7 +164,6 @@ class EmailCollector:
                 .list(
                     userId="me",
                     q=query,
-                    labelIds=["INBOX"],
                     maxResults=self.settings.sync_page_size,
                     pageToken=page_token,
                 )
@@ -187,7 +189,6 @@ class EmailCollector:
                     .list(
                         userId="me",
                         startHistoryId=history_id,
-                        labelId="INBOX",
                         maxResults=self.settings.sync_page_size,
                         pageToken=page_token,
                     )
